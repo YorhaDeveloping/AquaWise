@@ -144,21 +144,17 @@ class CatchAnalysisController extends Controller
     public function getSuggestions(CatchAnalysis $catchAnalysis)
     {
         try {
-            // First try to get AI suggestions based on past expert reviews
-            $similarReviews = ExpertReview::whereHas('catchAnalysis', function ($query) use ($catchAnalysis) {
-                $query->where('fish_species', $catchAnalysis->fish_species)
-                      ->where('weather_conditions', $catchAnalysis->weather_conditions);
-            })->get();
+            // Use all expert reviews for AI suggestions if there are at least 3
+            $allReviews = ExpertReview::all();
 
-            if ($similarReviews->count() >= 3) {
-                // If we have enough similar reviews, use them for AI suggestions
+            if ($allReviews->count() >= 3) {
                 $feedback = '';
                 $recommendations = '';
                 $sustainabilityRatings = [];
 
-                foreach ($similarReviews as $review) {
-                    $feedback .= $review->expert_feedback . "\n";
-                    $recommendations .= $review->recommendations . "\n";
+                foreach ($allReviews as $review) {
+                    $feedback .= ($review->feedback ?? '') . "\n";
+                    $recommendations .= $review->suggestions->pluck('recommendations')->implode("\n") . "\n";
                     $sustainabilityRatings[] = $review->sustainability_rating;
                 }
 
@@ -167,19 +163,19 @@ class CatchAnalysisController extends Controller
                 arsort($rating);
                 $sustainabilityRating = key($rating);
 
-                // Calculate confidence between 98% and 100% based on number of similar cases
-                $confidence = 0.98 + (min($similarReviews->count(), 10) / 500);
+                // Calculate confidence between 98% and 100% based on number of cases
+                $confidence = 0.98 + (min($allReviews->count(), 10) / 500);
 
                 return response()->json([
                     'feedback' => $this->summarizeFeedback($feedback),
                     'recommendations' => $this->summarizeRecommendations($recommendations),
                     'sustainability_rating' => $sustainabilityRating,
                     'confidence_score' => $confidence,
-                    'based_on_expert_cases' => $similarReviews->count()
+                    'based_on_expert_cases' => $allReviews->count()
                 ]);
             }
 
-            // If not enough similar reviews, use predefined suggestions
+            // If not enough reviews, use predefined suggestions
             $suggestions = $this->suggestionService->getSuggestions([
                 'weather_conditions' => $catchAnalysis->weather_conditions,
                 'quantity' => $catchAnalysis->quantity,
@@ -188,16 +184,30 @@ class CatchAnalysisController extends Controller
                 'total_weight' => $catchAnalysis->total_weight
             ]);
 
-            return response()->json([
-                'feedback' => $suggestions['feedback'],
-                'recommendations' => $suggestions['recommendations'],
-                'sustainability_rating' => $suggestions['sustainability_rating'],
-                'confidence_score' => 0.99, // 99% confidence for predefined rules
-                'based_on_expert_cases' => 0
-            ]);
-
+            if ($suggestions && isset($suggestions['feedback'], $suggestions['recommendations'], $suggestions['sustainability_rating'])) {
+                return response()->json([
+                    'feedback' => $suggestions['feedback'],
+                    'recommendations' => $suggestions['recommendations'],
+                    'sustainability_rating' => $suggestions['sustainability_rating'],
+                    'confidence_score' => 0.99, // 99% confidence for predefined rules
+                    'based_on_expert_cases' => 0
+                ]);
+            } else {
+                return response()->json([
+                    'feedback' => '',
+                    'recommendations' => '',
+                    'sustainability_rating' => '',
+                    'confidence_score' => 0,
+                    'based_on_expert_cases' => 0
+                ]);
+            }
         } catch (\Exception $e) {
             return response()->json([
+                'feedback' => '',
+                'recommendations' => '',
+                'sustainability_rating' => '',
+                'confidence_score' => 0,
+                'based_on_expert_cases' => 0,
                 'error' => 'Failed to generate suggestions: ' . $e->getMessage()
             ], 500);
         }
@@ -211,19 +221,28 @@ class CatchAnalysisController extends Controller
         $this->authorize('review', $catchAnalysis);
 
         $validated = $request->validate([
-            'expert_feedback' => 'required|string',
+            'feedback' => 'required|string',
             'recommendations' => 'required|string',
             'sustainability_rating' => 'required|in:Good,Concerning,Critical'
         ]);
 
         try {
-            ExpertReview::create([
+            $review = ExpertReview::create([
                 'catch_analysis_id' => $catchAnalysis->id,
                 'reviewer_id' => auth()->id(),
-                'expert_feedback' => $validated['expert_feedback'],
-                'recommendations' => $validated['recommendations'],
-                'sustainability_rating' => $validated['sustainability_rating']
+                'feedback' => $validated['feedback'],
+                'sustainability_rating' => $validated['sustainability_rating'],
             ]);
+
+            $recommendations = preg_split('/\r?\n/', $validated['recommendations']);
+            foreach ($recommendations as $rec) {
+                $rec = trim($rec);
+                if ($rec !== '') {
+                    $review->suggestions()->create([
+                        'recommendations' => $rec,
+                    ]);
+                }
+            }
 
             return redirect()
                 ->route('catch-analyses.show', $catchAnalysis)

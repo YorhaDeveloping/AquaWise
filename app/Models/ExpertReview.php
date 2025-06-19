@@ -13,8 +13,7 @@ class ExpertReview extends Model
     protected $fillable = [
         'catch_analysis_id',
         'reviewer_id',
-        'expert_feedback',
-        'recommendations',
+        'feedback',
         'sustainability_rating',
     ];
 
@@ -32,5 +31,13 @@ class ExpertReview extends Model
     public function reviewer(): BelongsTo
     {
         return $this->belongsTo(User::class, 'reviewer_id');
+    }
+
+    /**
+     * Get the suggestions for this review.
+     */
+    public function suggestions()
+    {
+        return $this->hasMany(Suggestion::class);
     }
 } 

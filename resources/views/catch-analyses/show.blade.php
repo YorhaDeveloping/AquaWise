@@ -274,7 +274,7 @@
                                     <h4 class="text-md font-medium text-gray-700 mb-3">Analysis & Observations</h4>
                                     <div class="prose prose-sm max-w-none text-gray-600">
                                         @php
-                                            $paragraphs = explode("\n\n", $review->expert_feedback);
+                                            $paragraphs = $review->feedback ? explode("\n\n", $review->feedback) : [];
                                         @endphp
                                         @foreach($paragraphs as $paragraph)
                                             <p class="mb-2">{{ $paragraph }}</p>
@@ -283,21 +283,21 @@
                                 </div>
 
                                 <!-- Recommendations Section -->
+                                @php
+                                    $suggestions = $review->suggestions;
+                                @endphp
                                 <div class="bg-white p-4 rounded-lg shadow-sm">
                                     <h4 class="text-md font-medium text-gray-700 mb-3">Recommendations</h4>
                                     <ul class="space-y-2">
-                                        @php
-                                            $recommendationList = explode("\n", $review->recommendations);
-                                        @endphp
-                                        @foreach($recommendationList as $recommendation)
-                                            @if(trim($recommendation))
+                                        @foreach($suggestions as $suggestion)
+                                            @if(trim($suggestion->recommendations))
                                                 <li class="flex items-start">
                                                     <span class="flex-shrink-0 w-4 h-4 mt-1 mr-2">
                                                         <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
                                                         </svg>
                                                     </span>
-                                                    <span class="text-gray-600">{{ trim($recommendation) }}</span>
+                                                    <span class="text-gray-600">{{ trim($suggestion->recommendations) }}</span>
                                                 </li>
                                             @endif
                                         @endforeach
@@ -418,16 +418,20 @@
                         </div>
                     </div>
 
+                    <div id="noSuggestionsMessage" class="hidden mb-4 p-4 bg-yellow-50 text-yellow-800 rounded-lg">
+                        No suggestions available for this analysis.
+                    </div>
+
                     <form action="{{ route('catch-analyses.review', $catchAnalysis) }}" method="POST">
                         @csrf
                         @method('PATCH')
                         <div class="space-y-4">
                             <div>
-                                <label for="expert_feedback" class="block text-sm font-medium text-gray-700">Expert Feedback</label>
+                                <label for="feedback" class="block text-sm font-medium text-gray-700">Expert Feedback</label>
                                 <div class="mt-1 relative">
                                     <textarea 
-                                        id="expert_feedback" 
-                                        name="expert_feedback" 
+                                        id="feedback" 
+                                        name="feedback" 
                                         rows="5" 
                                         class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" 
                                         placeholder="Provide your expert analysis..."></textarea>
@@ -485,7 +489,7 @@
                         const loading = document.getElementById('loading');
                         const error = document.getElementById('error');
                         const errorMessage = document.getElementById('errorMessage');
-                        const expertFeedback = document.getElementById('expert_feedback');
+                        const expertFeedback = document.getElementById('feedback');
                         const recommendations = document.getElementById('recommendations');
                         const sustainabilityRating = document.getElementById('sustainability_rating');
                         const resetForm = document.getElementById('resetForm');
@@ -550,18 +554,35 @@
                                 const data = await response.json();
 
                                 // Update form fields with suggestions
+                                let hasSuggestions = false;
                                 if (data.feedback) {
                                     expertFeedback.value = data.feedback;
                                     suggestionBadge1.classList.remove('hidden');
+                                    hasSuggestions = true;
+                                } else {
+                                    expertFeedback.value = '';
+                                    suggestionBadge1.classList.add('hidden');
                                 }
 
                                 if (data.recommendations) {
                                     recommendations.value = data.recommendations;
                                     suggestionBadge2.classList.remove('hidden');
+                                    hasSuggestions = true;
+                                } else {
+                                    recommendations.value = '';
+                                    suggestionBadge2.classList.add('hidden');
                                 }
 
                                 if (data.sustainability_rating) {
                                     sustainabilityRating.value = data.sustainability_rating;
+                                }
+
+                                // Show/hide no suggestions message
+                                const noSuggestionsMessage = document.getElementById('noSuggestionsMessage');
+                                if (!hasSuggestions) {
+                                    noSuggestionsMessage.classList.remove('hidden');
+                                } else {
+                                    noSuggestionsMessage.classList.add('hidden');
                                 }
 
                                 // Show AI stats if available
